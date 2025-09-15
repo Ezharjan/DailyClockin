@@ -133,72 +133,163 @@ class ClockInHandler(BaseHTTPRequestHandler):
     
     def add_attendance_record(self, today):
         """Add attendance record to README.md"""
-        readme_content = self.generate_readme_content(today)
-        
-        with open('README.md', 'w', encoding='utf-8') as f:
-            f.write(readme_content)
-    
-    def generate_readme_content(self, today):
-        """Generate README.md content with calendar view"""
-        existing_dates = set()
-        if os.path.exists('README.md'):
-            try:
-                with open('README.md', 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    date_pattern = r'(\d{4}-\d{2}-\d{2})'
-                    existing_dates = set(re.findall(date_pattern, content))
-            except:
-                pass
-        
         today_str = today.strftime('%Y-%m-%d')
-        existing_dates.add(today_str)
-        
-        current_year = today.year
-        current_month = today.month
-        
-        readme_content = f"""# Daily Clock-in Calendar 📅
+        formatted_date = today.strftime('%B %d, %Y')
+        day_name = today.strftime('%A')
+        record_line = f"- ✅ **{formatted_date}** ({day_name})\n"
+        new_updated = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        month_header = f"## {calendar.month_name[today.month]} {today.year}"
 
-## {calendar.month_name[current_month]} {current_year}
+        if os.path.exists('README.md'):
+            with open('README.md', 'r', encoding='utf-8') as f:
+                content = f.read()
+        else:
+            content = ""
 
-"""
-        
-        cal = calendar.monthcalendar(current_year, current_month)
-        readme_content += "| Mon | Tue | Wed | Thu | Fri | Sat | Sun |\n"
-        readme_content += "|-----|-----|-----|-----|-----|-----|-----|\n"
-        
+        if not content:
+            content = self.generate_initial_readme(today)
+            with open('README.md', 'w', encoding='utf-8') as f:
+                f.write(content)
+            return
+
+        # Append new month calendar if not exists
+        if month_header not in content:
+            records_pos = content.find("## Clock-in Records")
+            new_calendar = f"\n{month_header}\n\n"
+            cal_table = "| Mon | Tue | Wed | Thu | Fri | Sat | Sun |\n|-----|-----|-----|-----|-----|-----|-----|\n"
+            cal = calendar.monthcalendar(today.year, today.month)
+            for week in cal:
+                week_row = "|"
+                for d in week:
+                    if d == 0:
+                        week_row += "     |"
+                    else:
+                        week_row += f"   {d:2d} |"
+                cal_table += week_row + "\n"
+            new_calendar += cal_table
+            if records_pos != -1:
+                content = content[:records_pos] + new_calendar + content[records_pos:]
+            else:
+                # Rare case
+                content += new_calendar
+
+        # Mark today's date in the calendar
+        lines = content.splitlines()
+        month_header_line = month_header
+        header_i = -1
+        for i, line in enumerate(lines):
+            if line.strip() == month_header_line.strip():
+                header_i = i
+                break
+        if header_i != -1:
+            table_i = -1
+            for j in range(header_i, len(lines)):
+                if lines[j].startswith('| Mon |'):
+                    table_i = j
+                    break
+            if table_i != -1:
+                cal = calendar.monthcalendar(today.year, today.month)
+                found = False
+                for w, week in enumerate(cal):
+                    for d, dd in enumerate(week):
+                        if dd == today.day:
+                            week_num = w
+                            weekday = d
+                            found = True
+                            break
+                    if found:
+                        break
+                if found:
+                    week_line_i = table_i + 2 + week_num
+                    if week_line_i < len(lines):
+                        week_line = lines[week_line_i]
+                        cells = week_line.split('|')
+                        cell_i = weekday + 1
+                        if cell_i < len(cells):
+                            cell = cells[cell_i]
+                            if '✅' not in cell:
+                                new_cell = f"  ✅{today.day:2d}"
+                                cells[cell_i] = new_cell
+                                new_week_line = '|'.join(cells)
+                                lines[week_line_i] = new_week_line
+                                content = '\n'.join(lines)
+
+        # Add clock-in record if not exists
+        if record_line.strip()[:-1] not in content:  # Avoid exact match issues
+            records_header = "## Clock-in Records"
+            header_pos = content.find(records_header)
+            if header_pos != -1:
+                # Find position after \n\n
+                insert_pos = content.find('\n\n', header_pos) + 2
+                content = content[:insert_pos] + record_line + content[insert_pos:]
+
+        # Update attendance_dates comment
+        comment_pattern = r"<!-- attendance_dates: (.*?) -->"
+        match = re.search(comment_pattern, content)
+        if match:
+            dates_str = match.group(1)
+            dates = dates_str.split()
+            if today_str not in dates:
+                dates.append(today_str)
+                new_dates_str = ' '.join(sorted(dates))
+                content = re.sub(comment_pattern, f"<!-- attendance_dates: {new_dates_str} -->", content)
+        else:
+            content += f"\n<!-- attendance_dates: {today_str} -->"
+
+        # Update total days based on attendance_dates
+        match = re.search(comment_pattern, content)
+        if match:
+            dates_str = match.group(1)
+            total = len(dates_str.split())
+            total_pattern = r"\*\*Total Days Clocked In:\*\* \d+ days"
+            content = re.sub(total_pattern, f"**Total Days Clocked In:** {total} days\n\n", content)
+
+        # Update last updated
+        updated_pattern = r"\*\*Last Updated:\*\* \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
+        content = re.sub(updated_pattern, f"**Last Updated:** {new_updated}", content)
+
+        with open('README.md', 'w', encoding='utf-8') as f:
+            f.write(content)
+    
+    def generate_initial_readme(self, today):
+        today_str = today.strftime('%Y-%m-%d')
+        formatted_date = today.strftime('%B %d, %Y')
+        day_name = today.strftime('%A')
+        record_line = f"- ✅ **{formatted_date}** ({day_name})\n"
+        new_updated = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        month_header = f"## {calendar.month_name[today.month]} {today.year}\n\n"
+        cal_table = "| Mon | Tue | Wed | Thu | Fri | Sat | Sun |\n|-----|-----|-----|-----|-----|-----|-----|\n"
+        cal = calendar.monthcalendar(today.year, today.month)
         for week in cal:
             week_row = "|"
-            for day in week:
-                if day == 0:
+            for d in week:
+                if d == 0:
                     week_row += "     |"
                 else:
-                    day_str = f"{current_year}-{current_month:02d}-{day:02d}"
-                    if day_str in existing_dates:
-                        week_row += f"  ✅{day:2d} |"
+                    if d == today.day:
+                        week_row += f"  ✅{d:2d} |"
                     else:
-                        week_row += f"   {day:2d} |"
-            readme_content += week_row + "\n"
+                        week_row += f"   {d:2d} |"
+            cal_table += week_row + "\n"
         
-        readme_content += f"\n## Clock-in Records\n\n"
-        
-        sorted_dates = sorted(existing_dates, reverse=True)
-        for date_str in sorted_dates[:30]:
-            try:
-                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                day_name = date_obj.strftime('%A')
-                formatted_date = date_obj.strftime('%B %d, %Y')
-                readme_content += f"- ✅ **{formatted_date}** ({day_name})\n"
-            except:
-                readme_content += f"- ✅ {date_str}\n"
-        
-        readme_content += f"\n---\n\n**Total Days Clocked In:** {len(existing_dates)} days\n"
-        readme_content += f"**Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        
-        return readme_content
+        content = f"""# Daily Clock-in Calendar 📅
+
+{month_header}{cal_table}
+## Clock-in Records
+
+{record_line}
+---
+
+**Total Days Clocked In:** 1 days
+**Last Updated:** {new_updated}
+
+<!-- attendance_dates: {today_str} -->
+"""
+        return content
     
     def commit_and_push(self, today):
         """Commit and push changes to GitHub"""
-        timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+        timestamp = datetime.now().strftime('%Y/%m/%d-%H:%M:%S')
         commit_message = f'checked in: {timestamp}'
         
         try:
