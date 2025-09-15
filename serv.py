@@ -33,6 +33,9 @@ class ClockInHandler(BaseHTTPRequestHandler):
             self.handle_clock_in()
         elif parsed_path.path == '/api/status':
             self.check_status()
+        elif parsed_path.path == '/favicon.ico':
+            self.send_response(204)
+            self.end_headers()
         else:
             self.send_error(404)
     
@@ -215,6 +218,7 @@ class ClockInHandler(BaseHTTPRequestHandler):
                                 content = '\n'.join(lines)
 
         # Add clock-in record if not exists
+        added_record = False
         if record_line.strip()[:-1] not in content:  # Avoid exact match issues
             records_header = "## Clock-in Records"
             header_pos = content.find(records_header)
@@ -222,6 +226,7 @@ class ClockInHandler(BaseHTTPRequestHandler):
                 # Find position after \n\n
                 insert_pos = content.find('\n\n', header_pos) + 2
                 content = content[:insert_pos] + record_line + content[insert_pos:]
+                added_record = True
 
         # Update attendance_dates comment
         comment_pattern = r"<!-- attendance_dates: (.*?) -->"
@@ -236,13 +241,14 @@ class ClockInHandler(BaseHTTPRequestHandler):
         else:
             content += f"\n<!-- attendance_dates: {today_str} -->"
 
-        # Update total days based on attendance_dates
-        match = re.search(comment_pattern, content)
-        if match:
-            dates_str = match.group(1)
-            total = len(dates_str.split())
-            total_pattern = r"\*\*Total Days Clocked In:\*\* \d+ days"
-            content = re.sub(total_pattern, f"**Total Days Clocked In:** {total} days\n\n", content)
+        # Update total days by incrementing the existing count
+        if added_record:
+            total_pattern = r"\*\*Total Days Clocked In:\*\* (\d+) days"
+            match_total = re.search(total_pattern, content)
+            if match_total:
+                current_total = int(match_total.group(1))
+                new_total = current_total + 1
+                content = re.sub(total_pattern, f"**Total Days Clocked In:** {new_total} days", content)
 
         # Update last updated
         updated_pattern = r"\*\*Last Updated:\*\* \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
